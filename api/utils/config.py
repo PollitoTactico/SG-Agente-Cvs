@@ -10,11 +10,11 @@ class Settings(BaseSettings):
     
     # Azure OpenAI
     AZURE_OPENAI_ENDPOINT: str = Field(
-        default="https://ai-soporte-4783.cognitiveservices.azure.com/",
+        default="",
         description="Endpoint de Azure OpenAI"
     )
     AZURE_OPENAI_API_KEY: str = Field(
-        default="3luREZD3QxwIBheELqBUcBEKTFHECAuINYgylyLcQmOxHcSjkE1mJQQJ99BBACHYHv6XJ3w3AAAAACOGlUHU",
+        default="",
         description="API Key de Azure OpenAI"
     )
     AZURE_OPENAI_DEPLOYMENT_NAME: str = Field(
