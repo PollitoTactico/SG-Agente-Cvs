@@ -1,0 +1,35 @@
+# FastAPI y servidor
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+
+# LangChain y LangGraph
+langchain==0.1.4
+langchain-openai==0.0.5
+langchain-community==0.0.17
+langgraph==0.0.20
+
+# Azure
+azure-search-documents==11.4.0
+azure-identity==1.15.0
+azure-storage-blob==12.19.0
+openai==1.10.0
+
+# Procesamiento de documentos
+pypdf==4.0.1
+python-docx==1.1.0
+
+# Utilidades
+python-dotenv==1.0.0
+pydantic==2.5.3
+pydantic-settings==2.1.0
+numpy==1.26.3
+
+# Testing
+pytest==7.4.4
+pytest-asyncio==0.23.3
+pytest-cov==4.1.0
+httpx==0.26.0
+
+# Logging
+loguru==0.7.2

@@ -1,0 +1,71 @@
+# Python
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+.env.example/
+ENV/
+.venv/
+
+# Environment variables (SENSIBLE)
+.env
+.env.local
+.env.production
+
+# Credentials (SENSIBLE - Google Drive, Azure, etc.)
+credentials/*.json
+!credentials/README.md
+google-credentials.json
+*.pem
+*.key
+*.crt
+
+# API Keys y Secrets (SENSIBLE)
+**/secrets/
+**/keys/
+*.secret
+
+# Azure Credentials (SENSIBLE)
+azure-credentials.json
+.azure-credentials
+
+# Cache folders
+drive_cache/
+drivercache/
+__pycache__/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+logs/*.log
+*.log
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Azure
+.azure/
