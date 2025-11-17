@@ -1,11 +1,9 @@
 """
 Adaptador para Azure OpenAI.
-Implementa el puerto LLM usando LangChain.
+Implementa el puerto LLM usando OpenAI SDK directo.
 """
 from typing import List, Dict
-from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
-from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.messages import HumanMessage, AIMessage
+from openai import AsyncAzureOpenAI
 
 from api.application.output.port.llm_port import LLMPort
 from api.utils.config import settings
@@ -16,35 +14,17 @@ logger = setup_logger(__name__)
 
 class AzureOpenAIAdapter(LLMPort):
     """
-    Adaptador para Azure OpenAI usando LangChain.
+    Adaptador para Azure OpenAI usando SDK directo.
     """
     
     def __init__(self):
         """Inicializa el adaptador."""
-        # Configurar el modelo de chat
-        self.chat_model = AzureChatOpenAI(
+        self.client = AsyncAzureOpenAI(
             azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
             api_key=settings.AZURE_OPENAI_API_KEY,
-            deployment_name=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
-            api_version=settings.AZURE_OPENAI_API_VERSION,
-            temperature=0.7,
-            max_tokens=1000
-        )
-        
-        # Configurar embeddings
-        self.embeddings = AzureOpenAIEmbeddings(
-            azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
-            api_key=settings.AZURE_OPENAI_API_KEY,
-            deployment="text-embedding-ada-002",  # Ajustar según tu deployment
             api_version=settings.AZURE_OPENAI_API_VERSION
         )
-        
-        # Template para el prompt RAG
-        self.prompt_template = ChatPromptTemplate.from_messages([
-            ("system", self._get_system_prompt()),
-            MessagesPlaceholder(variable_name="chat_history", optional=True),
-            ("human", "{context}\n\nPregunta: {question}")
-        ])
+        self.deployment = settings.AZURE_OPENAI_DEPLOYMENT_NAME
         
         logger.info("Azure OpenAI Adapter inicializado")
     
@@ -72,26 +52,33 @@ INSTRUCCIONES:
             # Preparar el contexto
             context_text = "\n\n".join([f"[Documento {i+1}]\n{ctx}" for i, ctx in enumerate(context)])
             
-            # Convertir historial al formato de LangChain
-            history_messages = []
+            # Preparar mensajes
+            messages = [
+                {"role": "system", "content": self._get_system_prompt()}
+            ]
+            
+            # Agregar historial
             if chat_history:
-                for msg in chat_history:
-                    if msg["role"] == "user":
-                        history_messages.append(HumanMessage(content=msg["content"]))
-                    elif msg["role"] == "assistant":
-                        history_messages.append(AIMessage(content=msg["content"]))
+                messages.extend([
+                    {"role": msg["role"], "content": msg["content"]}
+                    for msg in chat_history
+                ])
             
-            # Crear la cadena
-            chain = self.prompt_template | self.chat_model
-            
-            # Ejecutar
-            response = await chain.ainvoke({
-                "context": context_text,
-                "question": prompt,
-                "chat_history": history_messages
+            # Agregar contexto y pregunta
+            messages.append({
+                "role": "user",
+                "content": f"{context_text}\n\nPregunta: {prompt}"
             })
             
-            return response.content
+            # Llamar a la API
+            response = await self.client.chat.completions.create(
+                model=self.deployment,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=1000
+            )
+            
+            return response.choices[0].message.content
             
         except Exception as e:
             logger.error(f"Error generando respuesta: {str(e)}")
@@ -102,8 +89,11 @@ INSTRUCCIONES:
         Genera embeddings para una lista de textos.
         """
         try:
-            embeddings = await self.embeddings.aembed_documents(texts)
-            return embeddings
+            response = await self.client.embeddings.create(
+                model=self.deployment,
+                input=texts
+            )
+            return [item.embedding for item in response.data]
         except Exception as e:
             logger.error(f"Error generando embeddings: {str(e)}")
             raise
