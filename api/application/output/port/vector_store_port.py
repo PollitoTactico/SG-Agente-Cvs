@@ -47,15 +47,17 @@ class VectorStorePort(ABC):
         self,
         query_embedding: List[float],
         top_k: int = 5,
-        filters: Dict[str, Any] | None = None
+        filters: Dict[str, Any] | None = None,
+        query_text: str = ""
     ) -> List[VectorDocument]:
         """
-        Busca documentos similares.
+        Busca documentos similares usando búsqueda híbrida.
         
         Args:
-            query_embedding: Embedding de la consulta
+            query_embedding: Embedding de la consulta (búsqueda vectorial)
             top_k: Número de resultados
             filters: Filtros adicionales
+            query_text: Texto de la query para búsqueda por keywords (BM25)
             
         Returns:
             Documentos similares con scores

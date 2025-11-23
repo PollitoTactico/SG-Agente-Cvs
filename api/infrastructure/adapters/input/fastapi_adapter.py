@@ -18,7 +18,9 @@ from api.infrastructure.adapters.input.models import (
 from api.application.service.rag_agent_service import RAGAgentService
 from api.application.service.document_manager_service import DocumentManagerService
 from api.infrastructure.adapters.output.azure_openai_adapter import AzureOpenAIAdapter
+from api.infrastructure.adapters.output.azure_search_adapter import AzureSearchAdapter
 from api.infrastructure.adapters.output.persistent_vector_store import PersistentVectorStore
+from api.infrastructure.adapters.output.in_memory_vector_store import InMemoryVectorStore
 from api.infrastructure.adapters.output.azure_blob_adapter import AzureBlobAdapter
 from api.utils.config import settings
 from api.utils.logger import setup_logger
@@ -50,11 +52,31 @@ def get_blob_adapter():
 
 
 def get_vector_store_adapter():
-    """Retorna instancia del adaptador Vector Store con persistencia en Blob."""
+    """
+    Retorna instancia del adaptador Vector Store.
+    Prioriza Azure Search si está configurado.
+    """
     global _vector_store_instance
     if _vector_store_instance is None:
-        blob_adapter = get_blob_adapter()
-        _vector_store_instance = PersistentVectorStore(blob_adapter)
+        # Verificar si hay configuración de Azure Search
+        has_search_config = (
+            settings.AZURE_SEARCH_ENDPOINT and 
+            settings.AZURE_SEARCH_ENDPOINT != "<TU_AZURE_SEARCH_ENDPOINT>" and
+            settings.AZURE_SEARCH_API_KEY and
+            settings.AZURE_SEARCH_API_KEY != "<TU_AZURE_SEARCH_API_KEY>"
+        )
+        
+        if has_search_config:
+            # Usar AzureSearchAdapter - PERSISTENCIA REAL EN AZURE SEARCH
+            logger.info("🔍 Usando Azure Search para vector store")
+            _vector_store_instance = AzureSearchAdapter()
+        else:
+            # Fallback a InMemory
+            logger.warning("⚠️  Azure Search no configurado. Usando InMemoryVectorStore")
+            logger.warning("   Los datos se perderán al reiniciar la aplicación")
+            logger.warning("   Configura AZURE_SEARCH_ENDPOINT y AZURE_SEARCH_API_KEY en .env para persistencia")
+            _vector_store_instance = InMemoryVectorStore()
+    
     return _vector_store_instance
 
 

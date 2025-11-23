@@ -84,14 +84,20 @@ class InMemoryVectorStore(VectorStorePort):
         # Formatear resultados
         results = []
         for doc, score in top_results:
-            result = VectorDocument({
-                "document_id": doc["metadata"].get("document_id", ""),
-                "content": doc["content"],
-                "filename": doc["metadata"].get("filename", ""),
-                "chunk_id": doc["id"],
-                "chunk_index": doc["metadata"].get("chunk_index", 0),
-                "score": float(score)
-            })
+            result = VectorDocument(
+                id=doc["id"],
+                content=doc["content"],
+                metadata={
+                    "document_id": doc["metadata"].get("document_id", ""),
+                    "filename": doc["metadata"].get("filename", ""),
+                    "chunk_id": doc["id"],
+                    "chunk_index": doc["metadata"].get("chunk_index", 0),
+                    "nombre_completo": doc["metadata"].get("nombre_completo", "Desconocido"),
+                    "seccion_cv": doc["metadata"].get("seccion_cv", "general"),
+                    "tipo_info": doc["metadata"].get("tipo_info", "general")
+                },
+                score=float(score)
+            )
             results.append(result)
         
         logger.info(f"Encontrados {len(results)} documentos similares")

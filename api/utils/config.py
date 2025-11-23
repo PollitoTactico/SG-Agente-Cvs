@@ -19,7 +19,11 @@ class Settings(BaseSettings):
     )
     AZURE_OPENAI_DEPLOYMENT_NAME: str = Field(
         default="gpt-5-chat",
-        description="Nombre del deployment"
+        description="Nombre del deployment para chat"
+    )
+    AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME: str = Field(
+        default="text-embedding-ada-002",
+        description="Nombre del deployment para embeddings"
     )
     AZURE_OPENAI_API_VERSION: str = Field(
         default="2025-01-01-preview",
@@ -45,9 +49,9 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = Field(default="INFO", description="Nivel de logging")
     
     # RAG Configuration
-    CHUNK_SIZE: int = Field(default=1000, description="Tamaño de chunks para documentos")
-    CHUNK_OVERLAP: int = Field(default=200, description="Overlap entre chunks")
-    TOP_K_RESULTS: int = Field(default=5, description="Número de resultados a recuperar")
+    CHUNK_SIZE: int = Field(default=1500, description="Tamaño de chunks para documentos")
+    CHUNK_OVERLAP: int = Field(default=300, description="Overlap entre chunks")
+    TOP_K_RESULTS: int = Field(default=25, description="Número de resultados a recuperar")
     
     # Azure Blob Storage
     AZURE_STORAGE_CONNECTION_STRING: str = Field(
