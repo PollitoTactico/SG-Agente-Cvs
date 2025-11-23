@@ -49,10 +49,17 @@ class InMemoryVectorStore(VectorStorePort):
         self,
         query_embedding: List[float],
         top_k: int = 5,
-        filters: Dict[str, Any] | None = None
+        filters: Dict[str, Any] | None = None,
+        query_text: str | None = None
     ) -> List[VectorDocument]:
         """
         Busca documentos similares usando similitud de coseno.
+        
+        Args:
+            query_embedding: Embedding de la consulta
+            top_k: Número de resultados a retornar
+            filters: Filtros opcionales
+            query_text: Texto de la consulta (para búsqueda híbrida, no usado en InMemory)
         """
         if not self.documents:
             logger.warning("No hay documentos en memoria")
