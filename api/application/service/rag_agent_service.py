@@ -72,7 +72,7 @@ class RAGAgentService(RAGAgentPort):
             
             # 3. Buscar documentos similares (aumentamos top_k para mejor cobertura)
             # BÚSQUEDA HÍBRIDA: Vector + Keyword para mejor precisión
-            initial_top_k = 200  # Aumentado para recuperar muchos más CVs diferentes
+            initial_top_k = 300  # Aumentado para búsqueda más exhaustiva y recuperar TODOS los CVs
             documents = await self.vector_store.similarity_search(
                 query_embedding=query_embedding,
                 top_k=initial_top_k,
@@ -94,7 +94,7 @@ class RAGAgentService(RAGAgentPort):
             min_personas = 5 if not nombre_buscado else 1
             final_docs = self._group_by_person_and_select_top(
                 filtered_docs, 
-                top_n=25,  # Aumentado a 25 chunks totales
+                top_n=30,  # Aumentado a 30 chunks totales para más información
                 min_personas=min_personas
             )
             
@@ -247,7 +247,7 @@ class RAGAgentService(RAGAgentPort):
         
         return filtered
     
-    def _group_by_person_and_select_top(self, documents, top_n: int = 25, min_personas: int = 5):
+    def _group_by_person_and_select_top(self, documents, top_n: int = 30, min_personas: int = 5):
         """
         Selecciona documentos asegurando MÍNIMO min_personas diferentes.
         - Si es 1 persona: retorna sus top chunks
@@ -255,7 +255,7 @@ class RAGAgentService(RAGAgentPort):
         
         Args:
             documents: Lista de documentos
-            top_n: Total de chunks a retornar
+            top_n: Total de chunks a retornar (default: 30)
             min_personas: Mínimo de personas diferentes a incluir (default: 5)
         """
         if not documents:
@@ -276,24 +276,44 @@ class RAGAgentService(RAGAgentPort):
         if personas_count == 1:
             return documents[:top_n]
         
-        # GARANTIZAR MÍNIMO min_personas diferentes
-        # Calcular chunks por persona para distribuir equitativamente
+        # ESTRATEGIA: Garantizar MÍNIMO min_personas diferentes con información balanceada
+        result = []
+        
+        # Ordenar personas por mejor score
+        sorted_persons = sorted(
+            by_person.items(), 
+            key=lambda x: max(doc.score for doc in x[1]), 
+            reverse=True
+        )
+        
+        # Calcular chunks por persona
         if personas_count >= min_personas:
-            chunks_per_person = max(3, top_n // personas_count)
+            # Hay suficientes personas: distribuir equitativamente
+            chunks_per_person = max(4, top_n // min(personas_count, min_personas))
         else:
-            # Si hay menos personas disponibles, tomar más chunks de cada una
-            chunks_per_person = max(5, top_n // personas_count)
+            # Pocas personas: dar más chunks a cada una
+            chunks_per_person = max(6, top_n // personas_count)
             logger.warning(f"⚠️  Solo {personas_count} personas disponibles, se esperaban {min_personas}")
         
-        result = []
-        personas_incluidas = 0
+        # PASO 1: Incluir chunks de las mejores min_personas
+        for i, (nombre, docs) in enumerate(sorted_persons):
+            if i < min_personas:
+                # Tomar los mejores chunks de esta persona
+                docs_sorted = sorted(docs, key=lambda x: x.score, reverse=True)
+                result.extend(docs_sorted[:chunks_per_person])
+                logger.info(f"  📄 {nombre}: {len(docs_sorted[:chunks_per_person])} chunks (score: {docs_sorted[0].score:.4f})")
         
-        # Primero: asegurar al menos 1 chunk de cada persona hasta min_personas
-        for nombre, docs in sorted(by_person.items(), key=lambda x: x[1][0].score, reverse=True):
-            if personas_incluidas < min_personas or personas_count < min_personas:
-                # Agregar chunks de esta persona
-                result.extend(docs[:chunks_per_person])
-                personas_incluidas += 1
+        # PASO 2: Si aún hay espacio, agregar más chunks de las mejores personas
+        if len(result) < top_n:
+            remaining = top_n - len(result)
+            for nombre, docs in sorted_persons[:min_personas]:
+                if remaining <= 0:
+                    break
+                # Agregar más chunks si están disponibles
+                docs_sorted = sorted(docs, key=lambda x: x.score, reverse=True)
+                extra_chunks = docs_sorted[chunks_per_person:chunks_per_person + (remaining // min_personas) + 1]
+                result.extend(extra_chunks)
+                remaining -= len(extra_chunks)
         
         # Ordenar por score y limitar a top_n
         result.sort(key=lambda x: x.score, reverse=True)
@@ -302,5 +322,9 @@ class RAGAgentService(RAGAgentPort):
         # Contar personas únicas en el resultado final
         personas_finales = len(set(doc.metadata.get("nombre_completo", "Desconocido") for doc in final_result))
         logger.info(f"✅ Resultado final: {len(final_result)} chunks de {personas_finales} personas diferentes")
+        
+        # Listar las personas incluidas
+        personas_incluidas = list(set(doc.metadata.get("nombre_completo", "Desconocido") for doc in final_result))
+        logger.info(f"📋 Personas en resultado: {personas_incluidas[:10]}")
         
         return final_result

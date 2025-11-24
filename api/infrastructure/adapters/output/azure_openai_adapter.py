@@ -138,7 +138,7 @@ RECUERDA:
                 model=self.deployment,
                 messages=messages,
                 temperature=0.7,
-                max_tokens=2000  # Aumentado para respuestas más completas
+                max_tokens=2500  # Aumentado para respuestas más completas con 5+ perfiles
             )
             
             return response.choices[0].message.content
