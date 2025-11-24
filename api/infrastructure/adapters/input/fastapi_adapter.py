@@ -19,8 +19,6 @@ from api.application.service.rag_agent_service import RAGAgentService
 from api.application.service.document_manager_service import DocumentManagerService
 from api.infrastructure.adapters.output.azure_openai_adapter import AzureOpenAIAdapter
 from api.infrastructure.adapters.output.azure_search_adapter import AzureSearchAdapter
-from api.infrastructure.adapters.output.persistent_vector_store import PersistentVectorStore
-from api.infrastructure.adapters.output.in_memory_vector_store import InMemoryVectorStore
 from api.infrastructure.adapters.output.azure_blob_adapter import AzureBlobAdapter
 from api.utils.config import settings
 from api.utils.logger import setup_logger
@@ -54,7 +52,7 @@ def get_blob_adapter():
 def get_vector_store_adapter():
     """
     Retorna instancia del adaptador Vector Store.
-    Prioriza Azure Search si está configurado.
+    Usa Azure Search para persistencia en la nube.
     """
     global _vector_store_instance
     if _vector_store_instance is None:
@@ -66,23 +64,20 @@ def get_vector_store_adapter():
             settings.AZURE_SEARCH_API_KEY != "<TU_AZURE_SEARCH_API_KEY>"
         )
         
-        if has_search_config:
-            # Usar AzureSearchAdapter - PERSISTENCIA REAL EN AZURE SEARCH
-            logger.info("🔍 Usando Azure Search para vector store")
-            _vector_store_instance = AzureSearchAdapter()
-        else:
-            # Fallback a InMemory
-            logger.warning("⚠️  Azure Search no configurado. Usando InMemoryVectorStore")
-            logger.warning("   Los datos se perderán al reiniciar la aplicación")
-            logger.warning("   Configura AZURE_SEARCH_ENDPOINT y AZURE_SEARCH_API_KEY en .env para persistencia")
-            _vector_store_instance = InMemoryVectorStore()
+        if not has_search_config:
+            logger.error("❌ Azure Search NO configurado en .env")
+            raise ValueError("Azure Search es requerido. Configura AZURE_SEARCH_ENDPOINT y AZURE_SEARCH_API_KEY")
+        
+        # Usar AzureSearchAdapter
+        logger.info("🔍 Usando Azure Search para vector store")
+        _vector_store_instance = AzureSearchAdapter()
     
     return _vector_store_instance
 
 
 def get_rag_service(
     llm_adapter: AzureOpenAIAdapter = Depends(get_llm_adapter),
-    vector_store_adapter: PersistentVectorStore = Depends(get_vector_store_adapter)
+    vector_store_adapter: AzureSearchAdapter = Depends(get_vector_store_adapter)
 ) -> RAGAgentService:
     """Retorna instancia del servicio RAG."""
     return RAGAgentService(llm_adapter, vector_store_adapter)
@@ -90,7 +85,7 @@ def get_rag_service(
 
 def get_document_service(
     llm_adapter: AzureOpenAIAdapter = Depends(get_llm_adapter),
-    vector_store_adapter: PersistentVectorStore = Depends(get_vector_store_adapter)
+    vector_store_adapter: AzureSearchAdapter = Depends(get_vector_store_adapter)
 ) -> DocumentManagerService:
     """Retorna instancia del servicio de documentos."""
     return DocumentManagerService(
@@ -297,16 +292,22 @@ def create_app() -> FastAPI:
     
     # Endpoint de información del storage
     @app.get("/api/v1/storage/stats", tags=["Storage"])
-    async def get_storage_stats():
+    async def get_storage_stats(
+        blob_adapter: AzureBlobAdapter = Depends(get_blob_adapter),
+        vector_store: AzureSearchAdapter = Depends(get_vector_store_adapter)
+    ):
         """
-        Obtiene estadísticas del almacenamiento y vector store.
+        📊 Obtiene estadísticas completas del almacenamiento.
+        
+        Muestra:
+        - Cuántos PDFs hay en Azure Blob Storage
+        - Cuántos documentos indexados en Azure Search
+        - Cuántas personas únicas en el sistema
+        - Lista de primeros 10 PDFs
         """
         try:
-            vector_store = get_vector_store_adapter()
-            blob_adapter = get_blob_adapter()
-            
-            # Estadísticas del vector store
-            stats = vector_store.get_stats()
+            # Estadísticas del vector store (Azure Search)
+            search_stats = vector_store.get_stats()
             
             # Listar PDFs en Blob
             pdfs = blob_adapter.list_pdfs()
@@ -315,16 +316,68 @@ def create_app() -> FastAPI:
             doc_ids = blob_adapter.list_all_documents()
             
             return {
-                "vector_store": stats,
-                "blob_storage": {
+                "azure_search": search_stats,
+                "azure_blob_storage": {
                     "pdfs_count": len(pdfs),
                     "embeddings_count": len(doc_ids),
-                    "pdfs": pdfs[:10]  # Solo primeros 10 para no saturar
+                    "sample_pdfs": pdfs[:10]  # Solo primeros 10
+                },
+                "summary": {
+                    "total_cv_pdfs": len(pdfs),
+                    "indexed_documents": search_stats.get("unique_documents", 0),
+                    "total_chunks": search_stats.get("total_chunks", 0),
+                    "unique_personas": search_stats.get("unique_personas", 0)
                 }
             }
         except Exception as e:
             logger.error(f"Error obteniendo estadísticas: {str(e)}")
             raise HTTPException(status_code=500, detail=str(e))
+    
+    # Endpoint para obtener detalle de CV de una persona
+    @app.get("/api/v1/cv/detail", tags=["CV Analysis"])
+    async def get_cv_detail(
+        name: str,
+        rag_service: RAGAgentService = Depends(get_rag_service)
+    ):
+        """
+        Obtiene información detallada del CV de una persona específica.
+        
+        - **name**: Nombre completo de la persona a buscar
+        """
+        try:
+            from api.application.input.port.rag_agent_port import QueryRequest as DomainQueryRequest
+            
+            # Crear una consulta específica para obtener información de la persona
+            query_text = f"Dame un resumen completo y detallado del perfil profesional de {name}, incluyendo su experiencia laboral, educación, habilidades técnicas y certificaciones."
+            
+            domain_request = DomainQueryRequest(
+                query=query_text,
+                session_id=f"cv_detail_{name}",
+                filters=None
+            )
+            
+            result = await rag_service.query(domain_request)
+            
+            # Extraer información de las fuentes
+            sources_info = []
+            for src in result.sources:
+                sources_info.append({
+                    "document": src["filename"],
+                    "page": src.get("chunk_id", "N/A"),
+                    "relevance": src["score"]
+                })
+            
+            return {
+                "name": name,
+                "content": result.answer,
+                "sources": sources_info,
+                "chunk_count": len(result.sources)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error obteniendo CV detail: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
+
     
     # Endpoint de migración desde Google Drive (UNA SOLA VEZ)
     @app.post("/api/v1/migrate/from-drive", tags=["Migration"])
@@ -421,6 +474,66 @@ def create_app() -> FastAPI:
             raise
         except Exception as e:
             logger.error(f"❌ Error en migración: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    # Endpoint para obtener detalles de un CV específico
+    @app.get("/api/v1/cv/detail", tags=["CV"])
+    async def get_cv_detail(
+        name: str,
+        rag_service: RAGAgentService = Depends(get_rag_service)
+    ):
+        """
+        🔍 Obtiene información detallada de un candidato específico.
+        
+        Parámetros:
+        - name: Nombre completo del candidato
+        
+        Retorna un resumen estructurado del CV con:
+        - Nombre completo
+        - Experiencia laboral resumida (últimos 3 trabajos)
+        - Habilidades principales
+        - Educación
+        - Años de experiencia
+        - Seniority estimado
+        """
+        try:
+            # Construir query específica para extraer información estructurada
+            query = f"""Analiza la información del CV de {name} y proporciona:
+
+1. Nombre completo
+2. Experiencia laboral (últimas 3 posiciones con empresa y cargo)
+3. Habilidades técnicas principales (top 5)
+4. Educación (último título)
+5. Años totales de experiencia
+6. Nivel de seniority (Junior/Semi-Senior/Senior)
+
+Formato tu respuesta de manera estructurada y concisa."""
+
+            # Llamar al servicio RAG
+            response = await rag_service.query(
+                query=query,
+                session_id=f"cv_detail_{name}",
+                conversation_history=[]
+            )
+            
+            # Extraer información de las fuentes
+            sources = []
+            for source in response.get("sources", []):
+                sources.append({
+                    "document": source.get("document", ""),
+                    "page": source.get("page", 0),
+                    "relevance": source.get("relevance_score", 0.0)
+                })
+            
+            return {
+                "name": name,
+                "content": response.get("response", ""),
+                "sources": sources,
+                "chunk_count": len(sources)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error obteniendo detalles del CV de {name}: {str(e)}")
             raise HTTPException(status_code=500, detail=str(e))
     
     logger.info("✅ Aplicación FastAPI configurada con Azure Blob Storage")

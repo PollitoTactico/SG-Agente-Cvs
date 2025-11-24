@@ -1,211 +1,277 @@
-# Agente RAG con Arquitectura Hexagonal
+# 🤖 SG Agente CVs - Sistema RAG para Análisis de CVs
 
-Este proyecto implementa un **Agente RAG (Retrieval-Augmented Generation)** usando **arquitectura hexagonal** con **LangChain**, **Azure OpenAI** y **Azure AI Search**.
-
-## ✨ Características
-
-- 🏗️ **Arquitectura Hexagonal**: Separación clara entre dominio e infraestructura
-- 🤖 **Azure OpenAI**: GPT-5 para generación de respuestas
-- 🔍 **Azure AI Search**: Base de datos vectorial para PDFs
-- 📄 **Procesamiento de PDFs**: Indexación automática de documentos
-- 💬 **Historial de Conversación**: Contexto de sesión para consultas
-- 🚀 **FastAPI**: API REST moderna y rápida
-- 🧪 **Testing**: Pruebas unitarias e integración
-- 📊 **Logging**: Sistema de logs estructurado
+Sistema de Retrieval-Augmented Generation (RAG) para análisis inteligente de CVs usando Azure OpenAI, Azure AI Search y Azure Blob Storage.
 
 ## 🏗️ Arquitectura
 
 ```
-SG-Agente-Cvs/
-├── api/
-│   ├── application/          # ⚙️ Capa de Aplicación (Dominio)
-│   │   ├── input/port/      # 📥 Interfaces de entrada
-│   │   │   ├── rag_agent_port.py
-│   │   │   └── document_manager_port.py
-│   │   ├── output/port/     # 📤 Interfaces de salida
-│   │   │   ├── llm_port.py
-│   │   │   └── vector_store_port.py
-│   │   └── service/         # 💼 Lógica de negocio
-│   │       ├── rag_agent_service.py
-│   │       └── document_manager_service.py
-│   ├── infrastructure/       # 🔧 Capa de Infraestructura
-│   │   └── adapters/
-│   │       ├── input/       # 🌐 Adaptadores de entrada
-│   │       │   ├── fastapi_adapter.py
-│   │       │   └── models.py
-│   │       └── output/      # 🔌 Adaptadores de salida
-│   │           ├── azure_openai_adapter.py
-│   │           └── azure_search_adapter.py
-│   └── utils/               # 🛠️ Utilidades
-│       ├── config.py
-│       └── logger.py
-├── logs/                    # 📝 Logs de la aplicación
-├── tests/                   # 🧪 Pruebas
-├── app.py                   # 🚀 Punto de entrada
-├── init_index.py           # 🔧 Script de inicialización
-└── example.py              # 📖 Ejemplo de uso
+┌─────────────────────────────────────────────────────────────┐
+│                    Frontend (React)                         │
+│              SG-Employe-Analisis-Front                      │
+└─────────────────┬───────────────────────────────────────────┘
+                  │ HTTP/REST
+                  ▼
+┌─────────────────────────────────────────────────────────────┐
+│                 Backend FastAPI                             │
+│                                                             │
+│  ┌─────────────┐  ┌──────────────┐  ┌──────────────┐     │
+│  │   RAG       │  │  Document    │  │   Storage    │     │
+│  │   Service   │  │   Manager    │  │   Stats      │     │
+│  └──────┬──────┘  └──────┬───────┘  └──────┬───────┘     │
+│         │                 │                  │              │
+│         ▼                 ▼                  ▼              │
+│  ┌──────────────────────────────────────────────────┐     │
+│  │          Azure OpenAI GPT-4o mini               │     │
+│  │     (Embeddings + Chat Completions)             │     │
+│  └──────────────────────────────────────────────────┘     │
+│         │                 │                  │              │
+│         ▼                 ▼                  ▼              │
+│  ┌─────────────┐   ┌──────────────┐  ┌──────────────┐    │
+│  │  Azure AI   │   │ Azure Blob   │  │  Azure Blob  │    │
+│  │   Search    │   │   Storage    │  │   Storage    │    │
+│  │  (Vectors)  │   │    (PDFs)    │  │ (Embeddings) │    │
+│  └─────────────┘   └──────────────┘  └──────────────┘    │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### Flujo de Datos (RAG)
+## ✨ Características Principales
 
+- 🔍 **Búsqueda Híbrida**: Combina búsqueda vectorial + keywords para máxima precisión
+- 🧠 **Azure OpenAI GPT-4o mini**: Comprensión avanzada de lenguaje natural
+- 📊 **Azure AI Search**: Indexación vectorial de alta performance
+- 💾 **Azure Blob Storage**: Almacenamiento persistente de PDFs y embeddings
+- 🎯 **Detección inteligente**: Distingue entre búsquedas generales vs consultas específicas
+- 📈 **Múltiples perfiles**: Retorna información de varios candidatos en búsquedas generales
+- 🔐 **CORS configurado**: Listo para frontend React
+
+## 🚀 Instalación
+
+### Requisitos previos
+
+- Python 3.9+
+- Cuenta Azure con:
+  - Azure OpenAI Service
+  - Azure AI Search
+  - Azure Blob Storage
+
+### Setup
+
+1. **Clonar el repositorio**
+```powershell
+git clone <repo-url>
+cd SG-Agente-Cvs
 ```
-Usuario
-  ↓
-FastAPI (Adaptador Input)
-  ↓
-RAG Service (Dominio)
-  ↓
-┌─────────────────┬──────────────────┐
-↓                 ↓                  ↓
-LLM Port    Vector Store Port   Session History
-↓                 ↓
-Azure OpenAI   Azure AI Search
-↓                 ↓
-Embeddings    Similarity Search
-  ↓                 ↓
-  └─────→ Respuesta + Fuentes ←─────┘
-            ↓
-       Usuario
+
+2. **Crear entorno virtual**
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
 ```
 
-## 🚀 Inicio Rápido
-
-### Prerequisitos
-- Python 3.11+
-- Cuenta de Azure activa
-- Azure OpenAI deployment (ya configurado)
-
-### Instalación
-
-1. **Clonar y preparar entorno**
-   ```powershell
-   cd c:\Programacion\SG-Agente-Cvs
-   python -m venv venv
-   .\venv\Scripts\Activate.ps1
-   ```
-
-2. **Instalar dependencias**
-   ```powershell
-   pip install -r requirements.txt
-   ```
-
-3. **Configurar Azure AI Search**
-   
-   Ver guía detallada: [AZURE_SETUP.md](AZURE_SETUP.md)
-   
-   Resumen rápido:
-   ```powershell
-   az search service create `
-     --name sg-agente-search `
-     --resource-group [TU_GRUPO] `
-     --sku free `
-     --location eastus
-   ```
+3. **Instalar dependencias**
+```powershell
+pip install -r requirements.txt
+```
 
 4. **Configurar variables de entorno**
-   ```powershell
-   cp .env.example .env
-   # Editar .env con tus credenciales
-   ```
 
-5. **Inicializar índice vectorial**
-   ```powershell
-   python init_index.py
-   ```
+Editar `.env`:
+```env
+# Azure OpenAI
+AZURE_OPENAI_ENDPOINT=https://tu-endpoint.cognitiveservices.azure.com/
+AZURE_OPENAI_API_KEY=tu-api-key
+AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4o-mini
+AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME=text-embedding-ada-002
 
-6. **Ejecutar la aplicación**
-   ```powershell
-   python app.py
-   ```
+# Azure AI Search
+AZURE_SEARCH_ENDPOINT=https://tu-search.search.windows.net
+AZURE_SEARCH_API_KEY=tu-search-key
+AZURE_SEARCH_INDEX_NAME=cvs-knowledge-base
 
-   La API estará en: http://localhost:8000/docs
+# Azure Blob Storage
+AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;...
+AZURE_STORAGE_CONTAINER_PDFS=pdfs
+AZURE_STORAGE_CONTAINER_EMBEDDINGS=embeddings
+```
 
-## 📚 Documentación
+5. **Inicializar el índice de Azure Search**
+```powershell
+python init_index.py
+```
 
-- 📖 [QUICKSTART.md](QUICKSTART.md) - Guía de inicio rápido
-- ☁️ [AZURE_SETUP.md](AZURE_SETUP.md) - Configuración de Azure AI Search
-- 💻 [SCRIPTS.md](SCRIPTS.md) - Scripts útiles de PowerShell
+6. **Ejecutar el servidor**
+```powershell
+python app.py
+```
 
-## 🔑 API Endpoints
+El servidor estará disponible en `http://localhost:8000`
 
-### Consultas RAG
+## 📚 API Endpoints
+
+### 🔍 RAG Agent
 
 **POST** `/api/v1/query`
 ```json
 {
-  "query": "¿Qué es la arquitectura hexagonal?",
-  "session_id": "user-123",
+  "query": "perfiles que sepan C#",
+  "session_id": "optional-uuid",
   "filters": {}
 }
 ```
 
-**DELETE** `/api/v1/sessions/{session_id}` - Limpiar historial
+Respuesta:
+```json
+{
+  "answer": "Encontré los siguientes perfiles con conocimientos en C#...",
+  "sources": [...],
+  "session_id": "uuid",
+  "metadata": {
+    "documents_found": 15,
+    "nombre_buscado": ""
+  }
+}
+```
 
-### Gestión de Documentos
+### 📄 Documents
 
-**POST** `/api/v1/documents/upload` - Subir PDF (multipart/form-data)
+**POST** `/api/v1/documents/upload`
+- Sube un PDF, lo indexa y guarda embeddings
 
-**GET** `/api/v1/documents` - Listar documentos
+**GET** `/api/v1/documents`
+- Lista todos los documentos indexados
 
-**DELETE** `/api/v1/documents/{document_id}` - Eliminar documento
+**DELETE** `/api/v1/documents/{document_id}`
+- Elimina un documento del índice
 
-### Utilidad
+### 📊 Storage Stats
 
-**GET** `/health` - Health check
+**GET** `/api/v1/storage/stats`
+```json
+{
+  "azure_search": {
+    "total_chunks": 1234,
+    "unique_documents": 45,
+    "unique_personas": 42
+  },
+  "azure_blob_storage": {
+    "pdfs_count": 45,
+    "embeddings_count": 45
+  }
+}
+```
+
+### 🏥 Health Check
+
+**GET** `/health`
+- Verifica el estado del sistema
+
+## 🎯 Ejemplos de Uso
+
+### Búsqueda General (Múltiples CVs)
+```bash
+curl -X POST http://localhost:8000/api/v1/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "perfiles que sepan Python y React"}'
+```
+
+### Consulta Específica (Una persona)
+```bash
+curl -X POST http://localhost:8000/api/v1/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "certificaciones de Juan Pérez"}'
+```
+
+### Ver Estadísticas
+```bash
+curl http://localhost:8000/api/v1/storage/stats
+```
 
 ## 🧪 Testing
 
 ```powershell
-# Todos los tests
+# Ejecutar tests
 pytest
 
 # Con coverage
-pytest --cov=api --cov-report=html
-
-# Solo unitarios
-pytest -m unit
-
-# Solo integración
-pytest -m integration
+pytest --cov=api tests/
 ```
 
-## 💰 Costos de Azure (Optimizado)
+## 📦 Estructura del Proyecto
 
-### Configuración Recomendada
-- **Azure AI Search (Free)**: $0/mes
-- **Azure OpenAI**: ~$0.002 por 1K tokens
-- **Estimado mensual**: $5-15 en desarrollo
+```
+SG-Agente-Cvs/
+├── api/
+│   ├── application/           # Lógica de negocio
+│   │   ├── input/port/       # Puertos de entrada
+│   │   ├── output/port/      # Puertos de salida
+│   │   └── service/          # Servicios (RAG, DocumentManager)
+│   ├── infrastructure/        # Adaptadores
+│   │   └── adapters/
+│   │       ├── input/        # FastAPI adapter
+│   │       └── output/       # Azure adapters
+│   └── utils/                # Config, logger
+├── tests/                    # Tests unitarios
+├── app.py                    # Punto de entrada
+├── requirements.txt
+└── .env                      # Variables de entorno
+```
 
-Ver [AZURE_SETUP.md](AZURE_SETUP.md) para detalles.
+## 🔧 Configuración Avanzada
 
-## 🐳 Docker (Opcional)
+### RAG Configuration
 
+Editar `.env`:
+```env
+CHUNK_SIZE=1500              # Tamaño de chunks
+CHUNK_OVERLAP=300            # Overlap entre chunks
+TOP_K_RESULTS=200            # Documentos a recuperar
+```
+
+### Prompt System
+
+Personalizar en `api/infrastructure/adapters/output/azure_openai_adapter.py`:
+```python
+def _get_system_prompt(self) -> str:
+    return """Tu prompt personalizado aquí..."""
+```
+
+## 🚨 Troubleshooting
+
+### Error: "Azure Search no configurado"
+Verificar que `.env` tenga:
+- `AZURE_SEARCH_ENDPOINT`
+- `AZURE_SEARCH_API_KEY`
+
+### Error: "Modelo no encontrado"
+Verificar que el deployment `gpt-4o-mini` exista en Azure OpenAI
+
+### Solo retorna 1 CV cuando debería retornar varios
+- Verificar logs: Debe decir "🔍 Búsqueda general detectada"
+- Aumentar `TOP_K_RESULTS` en `.env`
+
+## 📈 Monitoreo
+
+Ver logs en tiempo real:
 ```powershell
-# Build y ejecutar
-docker-compose up -d
-
-# Ver logs
-docker-compose logs -f
+tail -f logs/app.log
 ```
 
-## 🤝 Contribuir
+## 🔒 Seguridad
 
-1. Fork el proyecto
-2. Crea una rama (`git checkout -b feature/AmazingFeature`)
-3. Commit cambios (`git commit -m 'Add AmazingFeature'`)
-4. Push a la rama (`git push origin feature/AmazingFeature`)
-5. Abre un Pull Request
+- ✅ API Keys en `.env` (no committear)
+- ✅ CORS configurado
+- ✅ Validación de tipos con Pydantic
+- ✅ Sanitización de inputs
 
-## 📄 Licencia
+## 📝 Licencia
 
-MIT License - Ver [LICENSE](LICENSE) para más detalles
+Proprietary - SG Consulting
 
-## 🙏 Agradecimientos
+## 👥 Equipo
 
-- [LangChain](https://github.com/langchain-ai/langchain)
-- [FastAPI](https://fastapi.tiangolo.com/)
-- [Azure AI Services](https://azure.microsoft.com/services/cognitive-services/)
+Desarrollado por el equipo de SG Consulting
 
 ---
 
-**Nota**: Este proyecto está configurado para consumir la **menor cantidad de recursos de Azure** posible, utilizando el tier **Free** de Azure AI Search y optimizaciones en el uso de tokens.
+**Swagger UI**: http://localhost:8000/docs  
+**ReDoc**: http://localhost:8000/redoc

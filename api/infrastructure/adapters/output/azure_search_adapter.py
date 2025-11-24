@@ -369,3 +369,45 @@ class AzureSearchAdapter(VectorStorePort):
         except Exception as e:
             logger.error(f"Error obteniendo información del documento: {str(e)}")
             return None
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """
+        Obtiene estadísticas del índice de Azure Search.
+        
+        Returns:
+            Diccionario con estadísticas del índice
+        """
+        try:
+            # Contar total de documentos
+            results = self.search_client.search(
+                search_text="*",
+                select=["id", "document_id", "nombre_completo"],
+                top=10000  # Aumentar para contar todos
+            )
+            
+            total_chunks = 0
+            unique_documents = set()
+            unique_personas = set()
+            
+            for result in results:
+                total_chunks += 1
+                if "document_id" in result:
+                    unique_documents.add(result["document_id"])
+                if "nombre_completo" in result:
+                    unique_personas.add(result["nombre_completo"])
+            
+            return {
+                "index_name": settings.AZURE_SEARCH_INDEX_NAME,
+                "total_chunks": total_chunks,
+                "unique_documents": len(unique_documents),
+                "unique_personas": len(unique_personas),
+                "type": "AzureSearch"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error obteniendo estadísticas: {str(e)}")
+            return {
+                "index_name": settings.AZURE_SEARCH_INDEX_NAME,
+                "error": str(e),
+                "type": "AzureSearch"
+            }

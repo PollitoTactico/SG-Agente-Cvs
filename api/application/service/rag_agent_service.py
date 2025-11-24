@@ -5,6 +5,7 @@ from typing import Dict, List
 from uuid import uuid4
 from datetime import datetime
 import re
+import unicodedata
 
 from api.application.input.port.rag_agent_port import (
     RAGAgentPort, 
@@ -71,7 +72,7 @@ class RAGAgentService(RAGAgentPort):
             
             # 3. Buscar documentos similares (aumentamos top_k para mejor cobertura)
             # BÚSQUEDA HÍBRIDA: Vector + Keyword para mejor precisión
-            initial_top_k = 25  # Aumentado para recuperar más secciones del CV
+            initial_top_k = 200  # Aumentado para recuperar muchos más CVs diferentes
             documents = await self.vector_store.similarity_search(
                 query_embedding=query_embedding,
                 top_k=initial_top_k,
@@ -89,8 +90,13 @@ class RAGAgentService(RAGAgentPort):
             
             logger.info(f"Después de filtrar: {len(filtered_docs)} documentos relevantes")
             
-            # 5. Agrupar por persona y tomar top 10 para tener más contexto
-            final_docs = self._group_by_person_and_select_top(filtered_docs, top_n=10)
+            # 5. Agrupar por persona - MÍNIMO 5 personas en búsquedas generales
+            min_personas = 5 if not nombre_buscado else 1
+            final_docs = self._group_by_person_and_select_top(
+                filtered_docs, 
+                top_n=25,  # Aumentado a 25 chunks totales
+                min_personas=min_personas
+            )
             
             # 6. Extraer contexto con información de metadata
             context = []
@@ -159,116 +165,103 @@ class RAGAgentService(RAGAgentPort):
     
     def _extract_person_name_from_query(self, query: str) -> str:
         """
-        Extrae el nombre de la persona desde la query.
-        Ej: "dime que certificaciones tiene gorky palacios" -> "gorky palacios"
+        Extrae nombre de persona si es una consulta específica.
+        Usa Azure OpenAI para entender el lenguaje natural.
         """
-        # Patrones comunes de preguntas sobre personas
+        query_lower = query.lower()
+        
+        # Palabras de búsqueda general
+        general_keywords = [
+            'perfiles', 'personas', 'candidatos', 'cvs', 'empleados',
+            'alguien', 'quien', 'quienes', 'dame', 'lista', 'muestra',
+            'ayudame', 'busca', 'encuentra', 'hay', 'conocimientos'
+        ]
+        
+        if any(keyword in query_lower for keyword in general_keywords):
+            logger.info("🔍 Búsqueda general detectada")
+            return ""
+        
+        # Patrones específicos de persona
         patterns = [
             r'(?:sobre|de|tiene|posee|para)\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)+)',
-            r'\b([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)+)',
+            r'\b([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){1,3})\b',
         ]
         
         for pattern in patterns:
             match = re.search(pattern, query)
             if match:
                 nombre = match.group(1).strip()
-                if len(nombre.split()) >= 2:  # Al menos nombre y apellido
-                    return nombre.lower()  # Normalizar a minúsculas para comparación
-        
-        # Si no se encuentra patrón, buscar palabras capitalizadas consecutivas
-        words = query.split()
-        capitalized_sequence = []
-        for word in words:
-            # Limpiar puntuación
-            word_clean = re.sub(r'[^\w\sÁÉÍÓÚÑáéíóúñ]', '', word)
-            if word_clean and word_clean[0].isupper():
-                capitalized_sequence.append(word_clean)
-            elif capitalized_sequence and len(capitalized_sequence) >= 2:
-                # Encontramos una secuencia
-                return ' '.join(capitalized_sequence).lower()
-            else:
-                capitalized_sequence = []
-        
-        # Verificar si la última secuencia es válida
-        if len(capitalized_sequence) >= 2:
-            return ' '.join(capitalized_sequence).lower()
+                if len(nombre.split()) >= 2:
+                    logger.info(f"👤 Persona específica detectada: {nombre}")
+                    return nombre.lower()
         
         return ""
     
     def _filter_and_rerank_documents(self, documents, nombre_buscado: str):
         """
-        Filtra y re-rankea documentos por relevancia.
-        
-        1. Si se detectó un nombre, filtra chunks de esa persona
-        2. Re-rankea por score de similitud
-        3. Penaliza chunks que no contengan el nombre buscado
+        Filtra y re-rankea documentos.
+        - Si hay nombre específico: filtra por esa persona
+        - Si es búsqueda general: retorna TODOS los documentos
         """
+        if not nombre_buscado:
+            # Búsqueda general: retornar todos ordenados por score
+            documents.sort(key=lambda x: x.score, reverse=True)
+            logger.info("📊 Búsqueda general: retornando todos los documentos")
+            return documents
+        
+        # Búsqueda específica: filtrar por nombre
         filtered = []
+        nombre_parts = nombre_buscado.split()
+        
+        logger.info(f"🔍 Filtrando por nombre: '{nombre_buscado}', partes: {nombre_parts}")
         
         for doc in documents:
-            # Obtener metadata
-            nombre_doc = doc.metadata.get("nombre_completo", "").lower()
-            content_lower = doc.content.lower()
-            
-            # FILTRO 1: Si se detectó un nombre específico, validar coincidencia
-            if nombre_buscado:
-                # Separar el nombre buscado en palabras
-                nombre_buscado_parts = nombre_buscado.split()
-                
-                # Comparar nombre buscado con el nombre del documento
-                # Verificar si al menos 1 palabra del nombre coincide (más flexible)
-                matches = sum(1 for part in nombre_buscado_parts if part in nombre_doc)
-                
-                # También verificar en el contenido
-                content_matches = sum(1 for part in nombre_buscado_parts if part in content_lower)
-                
-                # Si no hay NINGUNA coincidencia, descartar
-                # Cambiado: solo requiere 1 coincidencia en vez de 2
-                if matches == 0 and content_matches == 0:
-                    logger.debug(f"Descartando chunk de '{nombre_doc}' - no coincide con '{nombre_buscado}'")
-                    continue
-            
-            # FILTRO 2: Verificar que el contenido no esté vacío
             if not doc.content.strip():
                 continue
             
-            # BOOST: Aumentar score si el nombre buscado aparece en el contenido
-            boost_factor = 1.0
-            if nombre_buscado:
-                nombre_buscado_parts = nombre_buscado.split()
-                content_matches = sum(1 for part in nombre_buscado_parts if part in content_lower)
-                nombre_matches = sum(1 for part in nombre_buscado_parts if part in nombre_doc)
-                
-                # Más boost si coincide en metadata de nombre
-                if nombre_matches > 0:
-                    boost_factor = 1.5  # +50% si está en el nombre
-                elif content_matches > 0:
-                    boost_factor = 1.2  # +20% si está en el contenido
+            nombre_doc = doc.metadata.get("nombre_completo", "").lower()
+            content_lower = doc.content.lower()
             
-            # Ajustar score
-            adjusted_score = doc.score * boost_factor
+            # Normalizar para quitar acentos
+            nombre_doc_norm = unicodedata.normalize('NFD', nombre_doc)
+            nombre_doc_norm = ''.join(c for c in nombre_doc_norm if unicodedata.category(c) != 'Mn')
             
-            # Crear nuevo documento con score ajustado
-            filtered.append({
-                'doc': doc,
-                'adjusted_score': adjusted_score
-            })
+            # Verificar coincidencias
+            matches = sum(1 for part in nombre_parts if part in nombre_doc_norm)
+            content_matches = sum(1 for part in nombre_parts if part in content_lower)
+            
+            if matches > 0 or content_matches > 0:
+                logger.debug(f"  ✅ Match: {nombre_doc} | matches={matches}, content={content_matches}, score={doc.score:.4f}")
+                boost = 1.0 + (matches * 0.3) + (content_matches * 0.2)
+                doc.score *= boost
+                filtered.append(doc)
+            else:
+                logger.debug(f"  ❌ No match: {nombre_doc}")
         
-        # Ordenar por score ajustado (descendente)
-        filtered.sort(key=lambda x: x['adjusted_score'], reverse=True)
+        filtered.sort(key=lambda x: x.score, reverse=True)
+        logger.info(f"👤 Filtrado por persona: {len(filtered)} documentos de '{nombre_buscado}'")
         
-        # Retornar solo los documentos
-        return [item['doc'] for item in filtered]
+        # Listar personas encontradas
+        personas_filtradas = set(doc.metadata.get("nombre_completo", "") for doc in filtered)
+        logger.info(f"📋 Personas en documentos filtrados: {list(personas_filtradas)[:5]}")
+        
+        return filtered
     
-    def _group_by_person_and_select_top(self, documents, top_n: int = 10):
+    def _group_by_person_and_select_top(self, documents, top_n: int = 25, min_personas: int = 5):
         """
-        Agrupa documentos por persona y selecciona los top_n más relevantes.
-        Si todos los docs son de la misma persona, retorna todos (hasta top_n).
+        Selecciona documentos asegurando MÍNIMO min_personas diferentes.
+        - Si es 1 persona: retorna sus top chunks
+        - Si son múltiples: distribuye para alcanzar mínimo 5 personas diferentes
+        
+        Args:
+            documents: Lista de documentos
+            top_n: Total de chunks a retornar
+            min_personas: Mínimo de personas diferentes a incluir (default: 5)
         """
         if not documents:
             return []
         
-        # Agrupar por nombre
+        # Agrupar por persona
         by_person = {}
         for doc in documents:
             nombre = doc.metadata.get("nombre_completo", "Desconocido")
@@ -276,21 +269,38 @@ class RAGAgentService(RAGAgentPort):
                 by_person[nombre] = []
             by_person[nombre].append(doc)
         
-        # Si solo hay una persona, retornar todos sus chunks (hasta top_n)
-        if len(by_person) == 1:
+        personas_count = len(by_person)
+        logger.info(f"👥 {personas_count} personas diferentes en resultados")
+        
+        # Si solo hay 1 persona o es búsqueda específica
+        if personas_count == 1:
             return documents[:top_n]
         
-        # Si hay múltiples personas, priorizar la que tenga más chunks
-        logger.info(f"Detectadas {len(by_person)} personas diferentes en resultados")
+        # GARANTIZAR MÍNIMO min_personas diferentes
+        # Calcular chunks por persona para distribuir equitativamente
+        if personas_count >= min_personas:
+            chunks_per_person = max(3, top_n // personas_count)
+        else:
+            # Si hay menos personas disponibles, tomar más chunks de cada una
+            chunks_per_person = max(5, top_n // personas_count)
+            logger.warning(f"⚠️  Solo {personas_count} personas disponibles, se esperaban {min_personas}")
         
-        # Ordenar personas por cantidad de chunks (más chunks = más relevante)
-        sorted_persons = sorted(by_person.items(), key=lambda x: len(x[1]), reverse=True)
+        result = []
+        personas_incluidas = 0
         
-        # Tomar la persona principal (con más chunks)
-        main_person = sorted_persons[0][0]
-        main_person_docs = sorted_persons[0][1]
+        # Primero: asegurar al menos 1 chunk de cada persona hasta min_personas
+        for nombre, docs in sorted(by_person.items(), key=lambda x: x[1][0].score, reverse=True):
+            if personas_incluidas < min_personas or personas_count < min_personas:
+                # Agregar chunks de esta persona
+                result.extend(docs[:chunks_per_person])
+                personas_incluidas += 1
         
-        logger.info(f"Persona principal seleccionada: {main_person} ({len(main_person_docs)} chunks)")
+        # Ordenar por score y limitar a top_n
+        result.sort(key=lambda x: x.score, reverse=True)
+        final_result = result[:top_n]
         
-        # Retornar top_n de la persona principal
-        return main_person_docs[:top_n]
+        # Contar personas únicas en el resultado final
+        personas_finales = len(set(doc.metadata.get("nombre_completo", "Desconocido") for doc in final_result))
+        logger.info(f"✅ Resultado final: {len(final_result)} chunks de {personas_finales} personas diferentes")
+        
+        return final_result
